@@ -1,0 +1,12 @@
+pymilvus==2.2.8
+albumentations
+validators
+torch 
+torchvision
+ftfy 
+regex 
+tqdm
+git+https://github.com/openai/CLIP.git
+typer
+rich
+fastparquet

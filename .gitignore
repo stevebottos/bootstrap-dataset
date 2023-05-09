@@ -1,1 +1,10 @@
-**/*__pychache__/
+__pycache__/
+.vscode/
+.archive/
+laion/*
+!laion/.gitkeep
+server/volumes/
+links
+scratch.py
+fastapi
+pydantic

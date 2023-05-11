@@ -2,6 +2,7 @@ import requests
 import typer
 from pymilvus import Collection, connections, utility
 from rich.console import Console
+import numpy as np
 
 import server.constants as constants
 
@@ -15,23 +16,9 @@ def print(*args):
     console.print(*args)
 
 
-@app.command(
-    help="Creates an empty collection 'laion' with happy presets in the db. Ensure that the db is running first."
-)
-def init_laion():
-    requests.post(f"{URL}:{PORT}/init_collection")
-
-
 @app.command(help="Drops the current 'laion' collection and associated indices.")
 def drop_laion():
-    requests.post(f"{URL}:{PORT}/drop_collection")
-
-
-@app.command(
-    help="Loads the database into RAM for fast querying. By default, this step happens automatically after ingesting. This must be done before querying, and only needs to be done once."
-)
-def load_laion():
-    requests.post(f"{URL}:{PORT}/load_collection")
+    requests.post(f"{URL}:{PORT}/drop_laion")
 
 
 @app.command(help="Query the database with an image to obtain matches.")
@@ -48,8 +35,8 @@ def query_laion(
         help="The maximum number of results to return.",
     ),
 ):
-    requests.post(
-        f"{URL}:{PORT}/query_collection",
+    res = requests.post(
+        f"{URL}:{PORT}/query_laion",
         json={
             "url": url,
             "similarity_threshold": similarity_threshold,
@@ -57,8 +44,20 @@ def query_laion(
         },
     )
 
+    data = res.json()
+    urls = []
+    similarities = []
+    for data in res.json().values():
+        similarities.extend(data["similarity"])
+        urls.extend(data["url"])
 
-@app.command(help="Downloads a specific chunk of the laion dataset")
+    similarities = np.round(similarities, 3)
+
+    data = sorted(zip(similarities, urls))
+    print(*data)
+
+
+@app.command(help="Loads all laion indices into milvus")
 def download_laion(
     index: int = typer.Argument(..., help="The laion shard to retrieve.")
 ):
@@ -66,8 +65,7 @@ def download_laion(
 
 
 @app.command(help="Adds (and indexes) a shard of laion to the database")
-def update_laion(
-    index: int = typer.Argument(..., help="The laion shard to retrieve."),
+def init_laion(
     batchsize: int = typer.Option(
         10000, help="The batchsize to update the database in. This eases RAM usage."
     ),
@@ -77,8 +75,8 @@ def update_laion(
     ),
 ):
     requests.post(
-        f"{URL}:{PORT}/update_laion",
-        json={"index": index, "batchsize": batchsize, "limit": limit},
+        f"{URL}:{PORT}/init_laion",
+        json={"batchsize": batchsize, "limit": limit},
     )
 
 

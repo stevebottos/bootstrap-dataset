@@ -37,8 +37,7 @@ class LaionIndex(BaseModel):
 
 
 class Update(BaseModel):
-    index: int
-    batchsize: int
+    batchsize: int = 10000
     limit: int = 0
 
 
@@ -46,7 +45,7 @@ def print(*args):
     console.print(*args)
 
 
-def _search(collection, vector_field, search_vectors, urls):
+def _search(collection, vector_field, search_vectors):
     search_param = {
         "data": search_vectors,
         "anns_field": vector_field,
@@ -55,19 +54,14 @@ def _search(collection, vector_field, search_vectors, urls):
             "params": {"nprobe": constants.NPROBE},
         },
         "limit": constants.TOPK,
+        "output_fields": [constants.SHARD_FIELD_NAME],
         "expr": "id_field >= 0",
     }
     results = collection.search(**search_param)
-    for i, result in enumerate(results):
-        print("\nSearch result for {}th vector: ".format(i))
-        for j, res in enumerate(result):
-            print("Top {}: {} ({})".format(j, urls[res.id], res.distance))
-
     return results
 
 
-@app.post("/init_collection")
-def init_collection():
+def _init_laion():
     connections.connect(host=constants.HOST, port=constants.PORT)
 
     field1 = FieldSchema(
@@ -90,7 +84,8 @@ def init_collection():
         is_primary=False,
     )
     schema = CollectionSchema(
-        fields=[field1, field2, field3], description="collection description"
+        fields=[field1, field2, field3],
+        description="collection description",
     )
     collection = Collection(
         name=constants.COLLECTION_NAME,
@@ -109,62 +104,98 @@ def init_collection():
     print(f"Collection {constants.COLLECTION_NAME} created.")
 
 
-@app.post("/load_collection")
-def load_collection():
-    connections.connect(host=constants.HOST, port=constants.PORT)
-    collection = Collection(constants.COLLECTION_NAME)
-    collection.load()
+@app.post("/init_laion")
+def init_laion(update: Update):
+    _init_laion()
 
-
-@app.post("/update_laion")
-def update_laion(update: Update):
-    index = update.index
     batchsize = update.batchsize
     limit = update.limit
 
-    embeddings = np.load(f"{constants.DATAFOLDER}/{index}/img_emb_{index}.npy")
-    if limit:
-        embeddings = embeddings[:limit]
+    embedding_files = glob.glob(f"{constants.DATAFOLDER}/**/*.npy")
+    n_shards = len(embedding_files)
 
-    indices = [i for i in range(len(embeddings))]
-    shards_col = [index] * len(embeddings)
+    embeddings = []
+    for j, embedding_file in enumerate(embedding_files):
+        index = int(embedding_file.split("/")[2])
 
-    n_chunks = math.ceil(len(embeddings) / batchsize)
+        embeddings = np.load(embedding_file)
+
+        if limit:
+            embeddings = embeddings[:limit]
+
+        indices = [i for i in range(len(embeddings))]
+        shards_col = [index] * len(embeddings)
+
+        n_chunks = math.ceil(len(embeddings) / batchsize)
+
+        connections.connect(host=constants.HOST, port=constants.PORT)
+
+        if not utility.has_collection(constants.COLLECTION_NAME):
+            print(
+                "No collection id exists yet. Run 'python commands.py create-empty-laion-collection'"
+            )
+            return
+
+        collection = Collection(constants.COLLECTION_NAME)
+        for i in range(n_chunks):
+            start = i * batchsize
+            end = min((i + 1) * batchsize, len(embeddings))
+
+            data = [
+                indices[start:end],
+                shards_col[start:end],
+                embeddings[start:end],
+            ]
+            collection.insert(data)
+            collection.flush()
+
+            print(f"Ingested batch {i+1} of {n_chunks}, shard {j+1} of {n_shards}")
+            break
+
+        if limit:
+            break
+
+    print(f"Loading {collection.num_entities} entries into memory.")
+    collection.load()
+    print(f"{collection.num_entities} entries loaded into memory.")
+
+
+@app.post("/query_laion")
+def query_laion(query: Query):
+    url = query.url
+    threshold = query.similarity_threshold
+    max_results = query.max_results
 
     connections.connect(host=constants.HOST, port=constants.PORT)
-
-    if not utility.has_collection(constants.COLLECTION_NAME):
-        print(
-            "No collection id exists yet. Run 'python commands.py create-empty-laion-collection'"
-        )
-        return
-
     collection = Collection(constants.COLLECTION_NAME)
-    for i in range(n_chunks):
-        start = i * batchsize
-        end = min((i + 1) * batchsize, len(embeddings))
 
-        data = [indices[start:end], shards_col[start:end], embeddings[start:end]]
-        collection.insert(data)
-        collection.flush()
-
-        print(f"Loaded batch {i+1} of {n_chunks}")
-
-
-@app.post("/query_collection")
-def query_collection(query: Query):
-    connections.connect(host=constants.HOST, port=constants.PORT)
-    collection = Collection(constants.COLLECTION_NAME)
-    urls = pd.read_parquet("server/laion/0/metadata_0.parquet")["url"]
-    image_features, err = inference.inference(query.url)
+    image_features, err = inference.inference(url)
     if err:
         console.print(f":x: Failed with:\n{err}.")
 
-    _ = _search(collection, constants.VECTOR_FIELD_NAME, image_features, urls)
+    results = _search(collection, constants.VECTOR_FIELD_NAME, image_features)[0]
+
+    from collections import defaultdict
+
+    data = defaultdict(lambda: defaultdict(list))
+
+    for r in results:
+        data[r.entity.get("laion_shard")]["indices"].append(r.id)
+        data[r.entity.get("laion_shard")]["similarity"].append(r.distance)
+
+    for shard in data:
+        urls = pd.read_parquet(
+            f"{constants.DATAFOLDER}/{shard}/metadata_{shard}.parquet"
+        )["url"]
+        indices = data[shard]["indices"]
+        data[shard]["url"] = [urls[i] for i in indices]
+        del data[shard]["indices"]
+
+    return data
 
 
-@app.post("/drop_collection")
-def drop_collection():
+@app.post("/drop_laion")
+def drop_laion():
     connections.connect(host=constants.HOST, port=constants.PORT)
     collection = Collection(constants.COLLECTION_NAME)
     collection.drop()

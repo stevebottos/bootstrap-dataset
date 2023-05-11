@@ -16,4 +16,4 @@ NPROBE = 16
 BASE = "https://deploy.laion.ai/8f83b608504d46bb81708ec86e912220/embeddings"
 METADATA = BASE + "/metadata/metadata_{idx}.parquet"
 INDEX = BASE + "/img_emb/img_emb_{idx}.npy"
-DATAFOLDER = "laion"
+DATAFOLDER = "server/laion"

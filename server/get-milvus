@@ -1,2 +1,0 @@
-#!/bin/bash
-wget https://github.com/milvus-io/milvus/releases/download/v2.2.7/milvus-standalone-docker-compose.yml -O server/docker-compose.yml

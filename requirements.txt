@@ -10,3 +10,6 @@ git+https://github.com/openai/CLIP.git
 typer
 rich
 fastparquet
+fastapi 
+uvicorn 
+pydantic

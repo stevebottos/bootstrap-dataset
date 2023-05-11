@@ -11,7 +11,8 @@ import urllib.request
 import traceback
 import io
 
-from util.resizer import Resizer
+from .resizer import Resizer
+
 
 # From https://github.com/rom1504/img2dataset/blob/main/img2dataset/downloader.py
 def download_image(
@@ -71,14 +72,20 @@ def download_image(
 
 def inference(url_or_filepath):
     # Pre-Preprocess
-    resizer = Resizer(224, "border", False)
-    if validators.url(url_or_filepath):
-        image_bytes, err = download_image(url_or_filepath)
-    else:
-        with open(url_or_filepath, "rb") as image:
-            image_bytes = BytesIO(image.read())
-    image_bytes = BytesIO(resizer(image_bytes)[0])
-    image = Image.open(image_bytes, formats=["JPEG"])
+    try:
+        resizer = Resizer(224, "border", False)
+        if validators.url(url_or_filepath):
+            image_bytes, err = download_image(url_or_filepath)
+        else:
+            with open(url_or_filepath, "rb") as image:
+                image_bytes = BytesIO(image.read())
+        image_bytes = BytesIO(resizer(image_bytes)[0])
+        image = Image.open(image_bytes, formats=["JPEG"])
+    except:
+        return (
+            None,
+            f"The url {url_or_filepath} failed. Are you sure you have the right link?",
+        )
 
     # Inference
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -92,7 +99,7 @@ def inference(url_or_filepath):
         clip_embedding /= clip_embedding.norm(dim=-1, keepdim=True)
     clip_embedding = clip_embedding.cpu().numpy()
 
-    return clip_embedding
+    return clip_embedding, None
 
 
 if __name__ == "__main__":
